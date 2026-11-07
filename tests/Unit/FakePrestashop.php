@@ -415,6 +415,32 @@ function helper()
 }
 PHP);
         $this->file("$root/src/Braced.php", "<?php\nnamespace Demo\\Braced {\n    use PrestaShop\\PrestaShop\\Core\\Hook\\HookDispatcherInterface;\n}\n");
+        // Version-aware code: each class is only used behind class_exists() (as X::class, as a string, fully qualified).
+        $this->file("$root/src/Guarded.php", <<<'PHP'
+<?php
+namespace Demo\Guarded;
+
+use PrestaShop\PrestaShop\Core\Missing\Gone;
+
+class Guarded
+{
+    public function run(): void
+    {
+        if (class_exists(Gone::class)) {
+            Gone::now();
+        }
+        if (\class_exists('PrestaShop\\PrestaShop\\Core\\Missing\\Other')) {
+            \PrestaShop\PrestaShop\Core\Missing\Other::later();
+        }
+        if (interface_exists(\PrestaShop\PrestaShop\Core\Missing\Contract::class)) {
+        }
+        class_exists($dynamic);
+        class_exists();
+        class_exists(Gone::CONSTANT);
+        $notACall = CLASS_EXISTS;
+    }
+}
+PHP);
         $this->file("$root/controllers/front/cron.php", "<?php\nclass DemomoduleCronModuleFrontController extends FrontController\n{\n    public function init()\n    {\n        \$this->undefinedAnywhere();\n        parent::init();\n    }\n}\n");
         $this->file("$root/upgrade/upgrade-1.1.0.php", "<?php\nfunction upgrade_module_1_1_0(\$module)\n{\n    self::outside();\n    \$property = \$module->registerHook;\n\n    return \$module->registerHook('displayFooter');\n}\n");
         $this->file("{$this->dir}/heaven-demo/module.spec.json", (string) json_encode(['ps_min' => '8.1.0', 'ps_max' => null]));

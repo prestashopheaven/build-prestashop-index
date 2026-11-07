@@ -264,7 +264,12 @@ final class PrestashopIndexTest extends TestCase
     {
         $this->store();
         $module = ModuleReferences::collect($this->fake->module());
-        self::assertSame(7, $module['files']);
+        self::assertSame(8, $module['files']);
+        self::assertSame([
+            'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Gone',
+            'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Other',
+            'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Contract',
+        ], $module['guarded'], 'class_exists() and friends with X::class or a string; a variable, nothing or a constant is no guard');
         self::assertSame(['actionDemoOwn'], $module['ownHooks']);
         $hooks = array_column(array_filter($module['references'], static fn (array $r): bool => $r['kind'] === 'hook'), 'via', 'name');
         self::assertSame(['displayFooter', 'displayFooterOld', 'actionValidateOrder', 'actionObjectOrderAddAfter', 'displayDemoCart', 'displayDemoNothing', 'newOrder', 'actionNewInNine', 'displayHeader'], array_keys($hooks));
@@ -300,8 +305,10 @@ final class PrestashopIndexTest extends TestCase
             'error PrestaShop\PrestaShop\Core\Missing\Gone: missing in PrestaShop 8.1.0 – 9.0.0',
             'error hook displayDemoNothing: missing in PrestaShop 8.1.0 – 9.0.0',
             'error hook displayFooterOld: missing in PrestaShop 9.0.0',
-            'error hook actionNewInNine: missing in PrestaShop 8.1.0',
+            'warning hook actionNewInNine: missing in PrestaShop 8.1.0: it only runs in the other releases, so the module must also work without it (HK-09)',
             'error hook displayHeader: missing in PrestaShop 8.1.0 – 9.0.0',
+            'warning PrestaShop\PrestaShop\Core\Missing\Gone: missing in PrestaShop 8.1.0 – 9.0.0 (the file tests it with class_exists(): only used where it exists)',
+            'warning PrestaShop\PrestaShop\Core\Missing\Other: missing in PrestaShop 8.1.0 – 9.0.0 (the file tests it with class_exists(): only used where it exists)',
             'error Order::newWay(): missing in PrestaShop 8.1.0',
             'warning Order::getByReference(): the signature differs between the releases: OrderCore::getByReference($reference) (8.1.0); OrderCore::getByReference(string $reference): ?self (9.0.0)',
             'warning Order::oldWay(): deprecated in PrestaShop 8.1.0: since 8.0, use newWay()',
@@ -311,6 +318,8 @@ final class PrestashopIndexTest extends TestCase
         ] as $expected) {
             self::assertContains($expected, $issues, $expected);
         }
+        self::assertNotContains('error hook actionNewInNine: missing in PrestaShop 8.1.0', $issues, 'a new hook is a warning');
+        self::assertContains('error hook displayFooterOld: missing in PrestaShop 9.0.0', $issues, 'a hook a newer release removed stays an error');
         $issuesText = implode("\n", $issues);
         self::assertStringNotContainsString('actionDemoOwn', $issuesText, 'the module executes it itself');
         self::assertStringNotContainsString('Tools::magic', $issuesText, '__callStatic answers it');

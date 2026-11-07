@@ -21,7 +21,10 @@ namespace PrestaShopHeaven\Build\PrestashopIndex;
  *
  * - error: a class, method, constant, function or hook is missing in a release of the range;
  * - warning: it is deprecated in a release of the range, its signature differs between the releases of the range, or
- *   a hook is only known by an alias.
+ *   a hook is only known by an alias. Also a warning instead of an error: a class (and its members) missing in some
+ *   releases that the same file tests with class_exists() (version-aware code), and a hook that only the newer releases
+ *   of the range have (HK-09: the module must also work where it does not run). A hook a newer release removed stays
+ *   an error.
  *
  * A reference to something that is not PrestaShop's is skipped: a class outside the index (a global name like
  * DateTime, a vendor class), a member of a class whose parents are not all indexed (it may come from vendor code), and
@@ -46,20 +49,25 @@ final class ModuleChecker
 
     private int $skipped = 0;
 
+    /** @var array<string, true> "file|class" pairs: the file tests the class with class_exists() */
+    private array $guarded;
+
     /**
      * Sets up a check against the releases at $positions of the index.
      *
      * @param list<int> $positions
      * @param array<string, ModuleClass> $moduleClasses
+     * @param list<string> $guarded "file|class" pairs (ModuleReferences::collect())
      */
-    private function __construct(private readonly SymbolIndex $index, private readonly array $positions, private readonly array $moduleClasses)
+    private function __construct(private readonly SymbolIndex $index, private readonly array $positions, private readonly array $moduleClasses, array $guarded = [])
     {
+        $this->guarded = array_fill_keys($guarded, true);
     }
 
     /**
      * Checks the references of a module (ModuleReferences::collect()) against the releases from $psMin to $psMax.
      *
-     * @param array{references: list<Reference>, classes: array<string, ModuleClass>} $module
+     * @param array{references: list<Reference>, classes: array<string, ModuleClass>, guarded?: list<string>} $module
      *
      * @return Result
      *
@@ -71,7 +79,7 @@ final class ModuleChecker
         if ($positions === []) {
             throw new \RuntimeException('No indexed PrestaShop release between ' . ($psMin ?? 'any') . ' and ' . ($psMax ?? 'any') . ' (indexed: ' . implode(', ', $index->versions()) . ').');
         }
-        $checker = new self($index, $positions, $module['classes']);
+        $checker = new self($index, $positions, $module['classes'], $module['guarded'] ?? []);
         foreach ($module['references'] as $reference) {
             match ($reference['kind']) {
                 'class' => $checker->checkClass($reference),
@@ -132,7 +140,7 @@ final class ModuleChecker
             return;
         }
         ++$this->checked;
-        $this->missing($reference, $class, $this->index->classPositions($class));
+        $this->missing($reference, $class, $this->index->classPositions($class), $class);
         $entry = $this->index->classEntry($class);
         if ($entry !== null && isset($entry['d'])) {
             $this->deprecated($reference, $class, VersionSet::decode($entry['d']), $entry['dm'] ?? '');
@@ -191,7 +199,7 @@ final class ModuleChecker
         }
         ++$this->checked;
         if (!$vendorOwner) {
-            $this->missing($reference, $symbol, $present);
+            $this->missing($reference, $symbol, $present, $reference['class']);
         }
         $this->deprecated($reference, $symbol, $deprecated, $message);
         if (count($signatures) > 1) {
@@ -230,7 +238,7 @@ final class ModuleChecker
         ++$this->checked;
         $found = $this->index->hookPositions($reference['name']);
         $symbol = 'hook ' . $reference['name'];
-        $this->missing($reference, $symbol, array_keys($found));
+        $this->missing($reference, $symbol, array_keys($found), null, true);
         $aliases = array_unique(array_filter(array_intersect_key($found, array_flip($this->positions)), static fn (string $how): bool => str_starts_with($how, 'alias of ')));
         foreach ($aliases as $how) {
             $this->add('warning', $symbol, "only known as an $how in some releases: register the hook by its real name", $reference);
@@ -335,17 +343,40 @@ final class ModuleChecker
     }
 
     /**
-     * An error when the symbol is missing in releases of the range.
+     * An error when the symbol is missing in releases of the range; a warning when the file tests $guardClass with
+     * class_exists(), or when a hook ($isHook) is only missing in releases older than those that have it.
      *
      * @param Reference $reference
      * @param list<int> $present the positions where it exists
      */
-    private function missing(array $reference, string $symbol, array $present): void
+    private function missing(array $reference, string $symbol, array $present, ?string $guardClass = null, bool $isHook = false): void
     {
         $missing = array_values(array_diff($this->positions, $present));
-        if ($missing !== []) {
-            $this->add('error', $symbol, 'missing in PrestaShop ' . $this->describe($missing), $reference);
+        if ($missing === []) {
+            return;
         }
+        $message = 'missing in PrestaShop ' . $this->describe($missing);
+        if ($guardClass !== null && isset($this->guarded[$reference['file'] . '|' . ltrim($guardClass, '\\')])) {
+            $this->add('warning', $symbol, "$message (the file tests it with class_exists(): only used where it exists)", $reference);
+        } elseif ($isHook && $this->onlyOlderMissing($missing)) {
+            $this->add('warning', $symbol, "$message: it only runs in the other releases, so the module must also work without it (HK-09)", $reference);
+        } else {
+            $this->add('error', $symbol, $message, $reference);
+        }
+    }
+
+    /**
+     * True when the missing positions are all older than every position of the range where the symbol exists: a new
+     * hook (HK-09), not one that a newer release removed (that stays an error: the newest release is always supported,
+     * CMP-08). Positions are in release order.
+     *
+     * @param list<int> $missing
+     */
+    private function onlyOlderMissing(array $missing): bool
+    {
+        $present = array_values(array_diff($this->positions, $missing));
+
+        return $present !== [] && max($missing) < min($present);
     }
 
     /**

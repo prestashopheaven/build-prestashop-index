@@ -51,7 +51,7 @@ final class ModuleReferences
     /**
      * The references of a module folder, plus its own classes and the hooks it executes itself.
      *
-     * @return array{references: list<Reference>, classes: array<string, ModuleClass>, ownHooks: list<string>, files: int}
+     * @return array{references: list<Reference>, classes: array<string, ModuleClass>, ownHooks: list<string>, guarded: list<string>, files: int}
      */
     public static function collect(string $moduleDir): array
     {
@@ -69,11 +69,15 @@ final class ModuleReferences
         $classes = [];
         $ownHooks = [];
         $hookMethods = [];
+        $guarded = [];
         foreach ($files as $file) {
             $relative = substr($file, strlen($moduleDir) + 1);
             $tokens = PhpApiScanner::tokens((string) file_get_contents($file));
             $found = $collector->scan($tokens, $relative);
             array_push($references, ...$found['references']);
+            foreach ($found['guarded'] as $guardedClass) {
+                $guarded[] = "$relative|$guardedClass";
+            }
             $classes += $found['classes'];
             array_push($ownHooks, ...HookCalls::fromTokens($tokens)['names']);
             if ($file === $main || str_starts_with($relative, 'src/Module/')) {
@@ -90,6 +94,7 @@ final class ModuleReferences
             'references' => array_values(array_filter($references, static fn (array $r): bool => $r['kind'] !== 'hook' || !in_array($r['name'], $ownHooks, true))),
             'classes' => $classes,
             'ownHooks' => $ownHooks,
+            'guarded' => array_values(array_unique($guarded)),
             'files' => count($files),
         ];
     }
@@ -131,7 +136,7 @@ final class ModuleReferences
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      *
-     * @return array{references: list<Reference>, classes: array<string, ModuleClass>, hookMethods: list<Reference>}
+     * @return array{references: list<Reference>, classes: array<string, ModuleClass>, hookMethods: list<Reference>, guarded: list<string>}
      */
     public function scan(array $tokens, string $file): array
     {
@@ -142,11 +147,16 @@ final class ModuleReferences
         $references = [];
         $classes = [];
         $hookMethods = [];
+        $guarded = [];
         $class = null;
         $classDepth = -1;
         $depth = 0;
         for ($i = 0; $i < $count; ++$i) {
             $t = $tokens[$i];
+            $guard = $this->guardedClass($i);
+            if ($guard !== null) {
+                $guarded[] = $guard;
+            }
             if ($t === '{' || (is_array($t) && ($t[0] === T_CURLY_OPEN || $t[0] === T_DOLLAR_OPEN_CURLY_BRACES))) {
                 ++$depth;
                 continue;
@@ -222,7 +232,38 @@ final class ModuleReferences
             }
         }
 
-        return ['references' => $references, 'classes' => $classes, 'hookMethods' => $hookMethods];
+        return ['references' => $references, 'classes' => $classes, 'hookMethods' => $hookMethods, 'guarded' => array_values(array_unique($guarded))];
+    }
+
+    /**
+     * The class a class_exists() (or interface_exists, trait_exists, enum_exists) call at $i tests, given as X::class
+     * or as a string; null when $i is no such call. A file that tests a class is version-aware code (CMP-01): what it
+     * does with that class runs only where the class exists.
+     */
+    private function guardedClass(int $i): ?string
+    {
+        $t = $this->tokens[$i];
+        if (!is_array($t) || !in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true)
+            || !in_array(strtolower(ltrim($t[1], '\\')), ['class_exists', 'interface_exists', 'trait_exists', 'enum_exists'], true)) {
+            return null;
+        }
+        $open = $this->next($i);
+        $name = $open !== null && $this->tokens[$open] === '(' ? $this->next($open) : null;
+        if ($name === null) {
+            return null;
+        }
+        $token = $this->tokens[$name];
+        if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING) {
+            return ltrim(str_replace('\\\\', '\\', substr($token[1], 1, -1)), '\\');
+        }
+        $colon = $this->next($name);
+        $keyword = $colon === null ? null : $this->next($colon);
+        if ($this->isName($name) && $colon !== null && is_array($this->tokens[$colon]) && $this->tokens[$colon][0] === T_DOUBLE_COLON
+            && $keyword !== null && strtolower($this->text($keyword)) === 'class') {
+            return $this->resolve($this->text($name));
+        }
+
+        return null;
     }
 
     /**
