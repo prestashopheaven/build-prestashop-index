@@ -1,0 +1,51 @@
+{
+    "name": "prestashopheaven/build-prestashop-index",
+    "description": "The PrestaShop index per release: classes, methods, constants, deprecations, hooks, services, configuration keys, tables and shipped vendor packages, with a search (ps-module ps find) and a check of a module against every release in its range (ps-module ps check).",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "George van Engers",
+            "email": "vanengers@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "ext-tokenizer": "*",
+        "ext-zlib": "*",
+        "prestashopheaven/build-package-index": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "PrestaShopHeaven\\Build\\PrestashopIndex\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PrestaShopHeaven\\Build\\PrestashopIndex\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        },
+        "prestashopheaven": {
+            "kind": "build",
+            "use-when": "Before using or writing PrestaShop code: does PrestaShop already have it and in which releases (ps-module ps find \"<term>\"); and to check that every PrestaShop class, method, constant and hook a module uses exists in every release of its range (ps-module ps check).",
+            "keywords": [
+                "prestashop index",
+                "hooks",
+                "services",
+                "deprecated",
+                "signature",
+                "compatibility",
+                "ps check",
+                "configuration keys",
+                "vendor"
+            ]
+        }
+    },
+    "bin": [
+        "bin/prestashop-index.php"
+    ]
+}
