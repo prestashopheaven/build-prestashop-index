@@ -28,8 +28,9 @@ use PrestaShopHeaven\Build\PackageIndex\PhpApiScanner;
  * - constants: X::NAME, and self::NAME / static::NAME / parent::NAME declared in a parent;
  * - functions: global function calls (checked only when PrestaShop declares the function, like pSQL);
  * - hooks: ModuleDefinition::HOOKS (src/Install/ModuleDefinition.php), registerHook('...') and the hook<Name> methods
- *   of the main class and its traits; hooks the module executes itself, and the hooks it declares for other modules in
- *   ModuleDefinition::PROVIDED_HOOKS, are its own and left out.
+ *   of the main class and its traits; hooks the module executes itself, the hooks it provides for other modules
+ *   (ModuleDefinition::PROVIDED_HOOKS) and the hooks of other modules it listens to (ModuleDefinition::OTHER_MODULE_HOOKS)
+ *   are not PrestaShop's and left out.
  *
  * Calls on objects ($order->getProducts(), Context::getContext()->shop->id) need type inference and are not collected.
  *
@@ -50,8 +51,8 @@ final class ModuleReferences
     private array $uses = [];
 
     /**
-     * The references of a module folder, plus its own classes and its own hooks (the hooks it executes itself and the
-     * ones ModuleDefinition::PROVIDED_HOOKS declares).
+     * The references of a module folder, plus its own classes and the hooks that are not PrestaShop's (the hooks it
+     * executes itself, and the ones ModuleDefinition::PROVIDED_HOOKS and OTHER_MODULE_HOOKS declare).
      *
      * @return array{references: list<Reference>, classes: array<string, ModuleClass>, ownHooks: list<string>, guarded: list<string>, files: int}
      */
@@ -87,7 +88,7 @@ final class ModuleReferences
             }
             if ($relative === 'src/Install/ModuleDefinition.php') {
                 array_push($references, ...self::definitionHooks($tokens, $relative));
-                array_push($ownHooks, ...self::providedHooks($tokens));
+                array_push($ownHooks, ...self::providedHooks($tokens), ...self::otherModuleHooks($tokens));
             }
         }
         array_push($references, ...$hookMethods);
@@ -136,9 +137,9 @@ final class ModuleReferences
 
     /**
      * The hooks of the constant PROVIDED_HOOKS in ModuleDefinition: the hooks the module provides for other modules
-     * (they call them, the module listens). Every string literal in its array, and every self::NAME that is a string
-     * constant of the same file ("public const TRACK_HOOK = 'actionX';"); other entries are ignored. Only these
-     * declared hooks count as the module's own, so a misspelled hook name elsewhere is still reported.
+     * (they call them, the module listens). Each entry is a string literal or a self::NAME string constant of the same
+     * file ("public const TRACK_HOOK = 'actionX';"); other entries are ignored. Only declared hooks count as the
+     * module's own, so a misspelled hook name elsewhere is still reported.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      *
@@ -146,8 +147,66 @@ final class ModuleReferences
      */
     public static function providedHooks(array $tokens): array
     {
-        $strings = [];
-        $range = null;
+        return self::declaredHooks($tokens, 'PROVIDED_HOOKS', false);
+    }
+
+    /**
+     * The hooks of the constant OTHER_MODULE_HOOKS in ModuleDefinition: hooks another module executes and this module
+     * listens to, as hook => technical name of that module ('registerGDPRConsent' => 'psgdpr'). The keys are the hooks
+     * (string literals or self::NAME string constants of the same file); the values only document the module. Entries
+     * without a key, or with another kind of key, are ignored.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return list<string>
+     */
+    public static function otherModuleHooks(array $tokens): array
+    {
+        return self::declaredHooks($tokens, 'OTHER_MODULE_HOOKS', true);
+    }
+
+    /**
+     * The hook names declared in the array constant $constant of a file: its entries ($keys false) or the keys of its
+     * entries ($keys true), each a string literal or a self::NAME string constant of the same file.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return list<string>
+     */
+    private static function declaredHooks(array $tokens, string $constant, bool $keys): array
+    {
+        $constants = self::constantValues($tokens);
+        $hooks = [];
+        foreach (self::arrayElements($constants[$constant] ?? []) as $element) {
+            if ($keys) {
+                $arrow = null;
+                foreach ($element as $k => $token) {
+                    if ($arrow === null && is_array($token) && $token[0] === T_DOUBLE_ARROW) {
+                        $arrow = $k;
+                    }
+                }
+                $element = $arrow === null ? [] : array_slice($element, 0, $arrow);
+            }
+            $hook = self::hookName($element, $constants);
+            if ($hook !== null) {
+                $hooks[] = $hook;
+            }
+        }
+
+        return $hooks;
+    }
+
+    /**
+     * The value of every constant of a file, as its significant tokens after "=" (the name is the last name before it,
+     * so a typed constant "const string X = ..." is X).
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return array<string, list<array{0: int, 1: string, 2: int}|string>>
+     */
+    private static function constantValues(array $tokens): array
+    {
+        $constants = [];
         $count = count($tokens);
         for ($i = 0; $i < $count; ++$i) {
             if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_CONST) {
@@ -168,24 +227,66 @@ final class ModuleReferences
                     $name = $token[1];
                 }
             }
-            $value ??= [];
-            if ($name === 'PROVIDED_HOOKS') {
-                $range = $value;
-            } elseif (count($value) === 1 && is_array($value[0]) && $value[0][0] === T_CONSTANT_ENCAPSED_STRING) {
-                $strings[$name] = substr($value[0][1], 1, -1);
-            }
-        }
-        $hooks = [];
-        foreach ($range ?? [] as $k => $token) {
-            if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING) {
-                $hooks[] = substr($token[1], 1, -1);
-            } elseif (is_array($token) && $token[0] === T_STRING && isset($strings[$token[1]]) && $k >= 2
-                && is_array($range[$k - 1]) && $range[$k - 1][0] === T_DOUBLE_COLON && is_array($range[$k - 2]) && strtolower($range[$k - 2][1]) === 'self') {
-                $hooks[] = $strings[$token[1]];
-            }
+            $constants[$name] = $value ?? [];
         }
 
-        return $hooks;
+        return $constants;
+    }
+
+    /**
+     * The top-level elements of a short array "[a, b => c, ...]" (as token lists), or none when the tokens are no
+     * short array.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $value
+     *
+     * @return list<list<array{0: int, 1: string, 2: int}|string>>
+     */
+    private static function arrayElements(array $value): array
+    {
+        $count = count($value);
+        if ($count < 2 || $value[0] !== '[' || $value[$count - 1] !== ']') {
+            return [];
+        }
+        $elements = [];
+        $current = [];
+        $depth = 0;
+        for ($i = 1; $i < $count - 1; ++$i) {
+            $token = $value[$i];
+            if ($token === ',' && $depth === 0) {
+                $elements[] = $current;
+                $current = [];
+                continue;
+            }
+            if ($token === '[' || $token === '(') {
+                ++$depth;
+            } elseif ($token === ']' || $token === ')') {
+                --$depth;
+            }
+            $current[] = $token;
+        }
+        $elements[] = $current;
+
+        return $elements;
+    }
+
+    /**
+     * The hook name an array element stands for: a string literal, or self::NAME of a string constant of the same file;
+     * null for anything else.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $element
+     * @param array<string, list<array{0: int, 1: string, 2: int}|string>> $constants
+     */
+    private static function hookName(array $element, array $constants): ?string
+    {
+        if (count($element) === 3 && is_array($element[0]) && strtolower($element[0][1]) === 'self'
+            && is_array($element[1]) && $element[1][0] === T_DOUBLE_COLON && is_array($element[2]) && $element[2][0] === T_STRING) {
+            $element = $constants[$element[2][1]] ?? [];
+        }
+        if (count($element) === 1 && is_array($element[0]) && $element[0][0] === T_CONSTANT_ENCAPSED_STRING) {
+            return substr($element[0][1], 1, -1);
+        }
+
+        return null;
     }
 
     /**

@@ -315,11 +315,16 @@ final class ModuleDefinition
         'actionNewInNine',
         'actionDemoLiteral',
         self::TRACK_HOOK,
+        'registerDemoConsent',
     ];
 
     public const PROVIDED_HOOKS = [
         'actionDemoLiteral',
         self::TRACK_HOOK,
+    ];
+
+    public const OTHER_MODULE_HOOKS = [
+        'registerDemoConsent' => 'demogdpr',
     ];
 }
 PHP);

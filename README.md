@@ -36,10 +36,17 @@ module when the module does not declare the method), PrestaShop's global functio
 `ModuleDefinition::HOOKS`, `registerHook()` and `hook<Name>()` methods. Calls on objects (`$order->getProducts()`) need
 type inference and are not checked; PHPStan covers them against two releases.
 
-A hook that is not PrestaShop's is the module's own only when the module executes it itself (`Hook::exec('...')`) or
-declares it in `ModuleDefinition::PROVIDED_HOOKS`: the hooks it provides for other modules (they call them, the module
-listens). Its entries are string literals or `self::NAME` string constants of the same class; anything else is ignored.
-Every other unknown hook stays an error, so a misspelled hook name is still found.
+A hook that is not PrestaShop's is accepted only when the module executes it itself (`Hook::exec('...')`) or declares
+it in `ModuleDefinition`:
+
+- `PROVIDED_HOOKS`: the hooks it provides for other modules (they call them, the module listens). Its entries are
+  string literals or `self::NAME` string constants of the same class.
+- `OTHER_MODULE_HOOKS`: the hooks of another module it listens to, as hook => technical name of the module that executes
+  it (`'registerGDPRConsent' => 'psgdpr'`). The keys are the hooks (string literals or `self::NAME` string constants of
+  the same class); the values only document the module.
+
+Anything else in those constants is ignored. Every other unknown hook stays an error, so a misspelled hook name is still
+found.
 
 ```php
 /** The hook other modules call to add an event to a cart. */
@@ -51,6 +58,13 @@ public const TRACK_HOOK = 'actionHeavenCartTrack';
  * @var string[]
  */
 public const PROVIDED_HOOKS = [self::TRACK_HOOK];
+
+/**
+ * The hooks of other modules this module listens to, with the module that executes each (ps check accepts them).
+ *
+ * @var array<string, string>
+ */
+public const OTHER_MODULE_HOOKS = ['registerGDPRConsent' => 'psgdpr'];
 ```
 
 ## Data

@@ -271,7 +271,7 @@ final class PrestashopIndexTest extends TestCase
             'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Other',
             'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Contract',
         ], $module['guarded'], 'class_exists() and friends with X::class or a string; a variable, nothing or a constant is no guard');
-        self::assertSame(['actionDemoOwn', 'actionDemoLiteral', 'actionDemoProvided'], $module['ownHooks'], 'executed, or declared in PROVIDED_HOOKS (a literal or a self:: string constant)');
+        self::assertSame(['actionDemoOwn', 'actionDemoLiteral', 'actionDemoProvided', 'registerDemoConsent'], $module['ownHooks'], 'executed, declared in PROVIDED_HOOKS (a literal or a self:: string constant) or in OTHER_MODULE_HOOKS');
         $hooks = array_column(array_filter($module['references'], static fn (array $r): bool => $r['kind'] === 'hook'), 'via', 'name');
         self::assertSame(['displayFooter', 'displayFooterOld', 'actionValidateOrder', 'actionObjectOrderAddAfter', 'displayDemoCart', 'displayDemoNothing', 'newOrder', 'actionNewInNine', 'displayHeader'], array_keys($hooks));
         self::assertArrayNotHasKey('notAHook', $hooks);
@@ -296,12 +296,10 @@ final class PrestashopIndexTest extends TestCase
 
     public function testTheHooksAModuleProvides(): void
     {
-        $hooks = static fn (string $php): array => ModuleReferences::providedHooks(PhpApiScanner::tokens("<?php
-$php"));
-        self::assertSame([], $hooks("final class ModuleDefinition
-{
-    public const HOOKS = ['actionA'];
-}"), 'no PROVIDED_HOOKS: no own hooks');
+        $hooks = static fn (string $php): array => ModuleReferences::providedHooks(PhpApiScanner::tokens("<?php\n$php"));
+        self::assertSame([], $hooks("final class ModuleDefinition\n{\n    public const HOOKS = ['actionA'];\n}"), 'no PROVIDED_HOOKS: no own hooks');
+        self::assertSame([], $hooks("final class ModuleDefinition\n{\n    public const PROVIDED_HOOKS = 'actionA';\n}"), 'not an array: nothing');
+        self::assertSame([], $hooks("final class ModuleDefinition\n{\n    public const PROVIDED_HOOKS = [];\n}"), 'an empty array: nothing');
         self::assertSame(['actionLiteral', 'actionDouble', 'actionTrack', 'actionTyped'], $hooks(<<<'PHP'
 use const Some\THING;
 
@@ -325,9 +323,37 @@ final class ModuleDefinition
         self::MISSING,
         Other::TRACK_HOOK,
         TRACK_HOOK,
+        ['actionNested', 'actionNested2'],
+        'actionKey' => 'x',
     ];
 }
 PHP), 'literals and self:: string constants of the same class; anything else is ignored');
+    }
+
+    public function testTheHooksOfOtherModulesAModuleListensTo(): void
+    {
+        $hooks = static fn (string $php): array => ModuleReferences::otherModuleHooks(PhpApiScanner::tokens("<?php\n$php"));
+        self::assertSame([], $hooks("final class ModuleDefinition\n{\n    public const PROVIDED_HOOKS = ['actionA'];\n}"), 'no OTHER_MODULE_HOOKS: nothing');
+        self::assertSame(['registerGDPRConsent', 'actionDoubleQuoted', 'actionOtherModule', 'actionNestedValue'], $hooks(<<<'PHP'
+final class ModuleDefinition
+{
+    public const OTHER_HOOK = 'actionOtherModule';
+    public const NUMBER = 42;
+
+    /** Hooks of other modules, with the module that executes each. */
+    public const OTHER_MODULE_HOOKS = [
+        'registerGDPRConsent' => 'psgdpr', // a comment
+        "actionDoubleQuoted" => 'othermodule',
+        self::OTHER_HOOK => 'othermodule',
+        'actionNestedValue' => ['a', 'b'],
+        'actionWithoutKey',
+        self::NUMBER => 'x',
+        self::MISSING => 'x',
+        Other::OTHER_HOOK => 'x',
+        42 => 'x',
+    ];
+}
+PHP), 'the keys: literals and self:: string constants of the same class; entries without a key or with another key are ignored');
     }
 
     public function testTheCheckFindsMissingDeprecatedAndChangedSymbols(): void
@@ -361,6 +387,8 @@ PHP), 'literals and self:: string constants of the same class; anything else is 
         self::assertStringNotContainsString('actionDemoOwn', $issuesText, 'the module executes it itself');
         self::assertStringNotContainsString('actionDemoLiteral', $issuesText, 'the module provides it (PROVIDED_HOOKS)');
         self::assertStringNotContainsString('actionDemoProvided', $issuesText, 'the module provides it (PROVIDED_HOOKS, self::TRACK_HOOK)');
+        self::assertStringNotContainsString('registerDemoConsent', $issuesText, 'another module executes it (OTHER_MODULE_HOOKS)');
+        self::assertContains('error hook displayDemoNothing: missing in PrestaShop 8.1.0 – 9.0.0', $issues, 'a hook not declared anywhere stays an error');
         self::assertStringNotContainsString('Tools::magic', $issuesText, '__callStatic answers it');
         self::assertStringNotContainsString('undefinedAnywhere', $issuesText, 'FrontController has a parent outside the index');
         self::assertStringNotContainsString('fromVendor', $issuesText, 'a vendor class or trait may declare it');

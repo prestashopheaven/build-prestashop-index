@@ -2,6 +2,13 @@
 
 The version is the one of the monorepo `mono-build-knowledge`.
 
+## 1.0.2
+
+- `check`: the hooks of other modules a module listens to, declared in `ModuleDefinition::OTHER_MODULE_HOOKS` as hook =>
+  module (`'registerGDPRConsent' => 'psgdpr'`; keys as string literals or `self::NAME` string constants), are no
+  PrestaShop hooks either; other unknown hooks stay an error (found on `heavenpricedropalert`). `PROVIDED_HOOKS` is now
+  read per array entry: a nested array or a keyed entry in it is ignored.
+
 ## 1.0.1
 
 - `check`: the hooks a module declares in `ModuleDefinition::PROVIDED_HOOKS` (string literals and `self::NAME` string
