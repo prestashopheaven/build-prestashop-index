@@ -28,7 +28,8 @@ use PrestaShopHeaven\Build\PackageIndex\PhpApiScanner;
  * - constants: X::NAME, and self::NAME / static::NAME / parent::NAME declared in a parent;
  * - functions: global function calls (checked only when PrestaShop declares the function, like pSQL);
  * - hooks: ModuleDefinition::HOOKS (src/Install/ModuleDefinition.php), registerHook('...') and the hook<Name> methods
- *   of the main class and its traits; hooks the module executes itself are its own and left out.
+ *   of the main class and its traits; hooks the module executes itself, and the hooks it declares for other modules in
+ *   ModuleDefinition::PROVIDED_HOOKS, are its own and left out.
  *
  * Calls on objects ($order->getProducts(), Context::getContext()->shop->id) need type inference and are not collected.
  *
@@ -49,7 +50,8 @@ final class ModuleReferences
     private array $uses = [];
 
     /**
-     * The references of a module folder, plus its own classes and the hooks it executes itself.
+     * The references of a module folder, plus its own classes and its own hooks (the hooks it executes itself and the
+     * ones ModuleDefinition::PROVIDED_HOOKS declares).
      *
      * @return array{references: list<Reference>, classes: array<string, ModuleClass>, ownHooks: list<string>, guarded: list<string>, files: int}
      */
@@ -85,6 +87,7 @@ final class ModuleReferences
             }
             if ($relative === 'src/Install/ModuleDefinition.php') {
                 array_push($references, ...self::definitionHooks($tokens, $relative));
+                array_push($ownHooks, ...self::providedHooks($tokens));
             }
         }
         array_push($references, ...$hookMethods);
@@ -125,6 +128,60 @@ final class ModuleReferences
                 if (is_array($tokens[$j]) && $tokens[$j][0] === T_CONSTANT_ENCAPSED_STRING) {
                     $hooks[] = self::reference('hook', '', substr($tokens[$j][1], 1, -1), $file, $tokens[$j][2], 'ModuleDefinition::HOOKS');
                 }
+            }
+        }
+
+        return $hooks;
+    }
+
+    /**
+     * The hooks of the constant PROVIDED_HOOKS in ModuleDefinition: the hooks the module provides for other modules
+     * (they call them, the module listens). Every string literal in its array, and every self::NAME that is a string
+     * constant of the same file ("public const TRACK_HOOK = 'actionX';"); other entries are ignored. Only these
+     * declared hooks count as the module's own, so a misspelled hook name elsewhere is still reported.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     *
+     * @return list<string>
+     */
+    public static function providedHooks(array $tokens): array
+    {
+        $strings = [];
+        $range = null;
+        $count = count($tokens);
+        for ($i = 0; $i < $count; ++$i) {
+            if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_CONST) {
+                continue;
+            }
+            $name = '';
+            $value = null;
+            for ($j = $i + 1; $j < $count && $tokens[$j] !== ';'; ++$j) {
+                $token = $tokens[$j];
+                if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                    continue;
+                }
+                if ($value !== null) {
+                    $value[] = $token;
+                } elseif ($token === '=') {
+                    $value = [];
+                } elseif (is_array($token) && $token[0] === T_STRING) {
+                    $name = $token[1];
+                }
+            }
+            $value ??= [];
+            if ($name === 'PROVIDED_HOOKS') {
+                $range = $value;
+            } elseif (count($value) === 1 && is_array($value[0]) && $value[0][0] === T_CONSTANT_ENCAPSED_STRING) {
+                $strings[$name] = substr($value[0][1], 1, -1);
+            }
+        }
+        $hooks = [];
+        foreach ($range ?? [] as $k => $token) {
+            if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING) {
+                $hooks[] = substr($token[1], 1, -1);
+            } elseif (is_array($token) && $token[0] === T_STRING && isset($strings[$token[1]]) && $k >= 2
+                && is_array($range[$k - 1]) && $range[$k - 1][0] === T_DOUBLE_COLON && is_array($range[$k - 2]) && strtolower($range[$k - 2][1]) === 'self') {
+                $hooks[] = $strings[$token[1]];
             }
         }
 

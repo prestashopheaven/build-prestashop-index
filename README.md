@@ -36,6 +36,23 @@ module when the module does not declare the method), PrestaShop's global functio
 `ModuleDefinition::HOOKS`, `registerHook()` and `hook<Name>()` methods. Calls on objects (`$order->getProducts()`) need
 type inference and are not checked; PHPStan covers them against two releases.
 
+A hook that is not PrestaShop's is the module's own only when the module executes it itself (`Hook::exec('...')`) or
+declares it in `ModuleDefinition::PROVIDED_HOOKS`: the hooks it provides for other modules (they call them, the module
+listens). Its entries are string literals or `self::NAME` string constants of the same class; anything else is ignored.
+Every other unknown hook stays an error, so a misspelled hook name is still found.
+
+```php
+/** The hook other modules call to add an event to a cart. */
+public const TRACK_HOOK = 'actionHeavenCartTrack';
+
+/**
+ * The hooks this module provides for other modules (ps check accepts them as its own).
+ *
+ * @var string[]
+ */
+public const PROVIDED_HOOKS = [self::TRACK_HOOK];
+```
+
 ## Data
 
 `data/ps-<version>.json.gz` per release and the merged `data/symbols.json.gz` (symbol => the releases it exists in,

@@ -264,6 +264,10 @@ class Demomodule extends Module
     {
     }
 
+    public function hookActionDemoProvided($params)
+    {
+    }
+
     public function getContent()
     {
         $order = new Order(1);
@@ -298,6 +302,10 @@ final class ModuleDefinition
 {
     public const OTHER = ['notAHook'];
 
+    public const TRACK_HOOK = 'actionDemoProvided';
+
+    public const NOT_A_STRING = 42;
+
     public const HOOKS = [
         'actionValidateOrder',
         'actionObjectOrderAddAfter',
@@ -305,6 +313,13 @@ final class ModuleDefinition
         'displayDemoNothing',
         'newOrder',
         'actionNewInNine',
+        'actionDemoLiteral',
+        self::TRACK_HOOK,
+    ];
+
+    public const PROVIDED_HOOKS = [
+        'actionDemoLiteral',
+        self::TRACK_HOOK,
     ];
 }
 PHP);

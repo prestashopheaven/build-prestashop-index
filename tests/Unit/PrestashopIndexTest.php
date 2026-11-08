@@ -17,6 +17,7 @@ declare(strict_types=1);
 namespace PrestaShopHeaven\Build\PrestashopIndex\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use PrestaShopHeaven\Build\PackageIndex\PhpApiScanner;
 use PrestaShopHeaven\Build\PrestashopIndex\Cli;
 use PrestaShopHeaven\Build\PrestashopIndex\Finder;
 use PrestaShopHeaven\Build\PrestashopIndex\Generator;
@@ -270,7 +271,7 @@ final class PrestashopIndexTest extends TestCase
             'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Other',
             'src/Guarded.php|PrestaShop\PrestaShop\Core\Missing\Contract',
         ], $module['guarded'], 'class_exists() and friends with X::class or a string; a variable, nothing or a constant is no guard');
-        self::assertSame(['actionDemoOwn'], $module['ownHooks']);
+        self::assertSame(['actionDemoOwn', 'actionDemoLiteral', 'actionDemoProvided'], $module['ownHooks'], 'executed, or declared in PROVIDED_HOOKS (a literal or a self:: string constant)');
         $hooks = array_column(array_filter($module['references'], static fn (array $r): bool => $r['kind'] === 'hook'), 'via', 'name');
         self::assertSame(['displayFooter', 'displayFooterOld', 'actionValidateOrder', 'actionObjectOrderAddAfter', 'displayDemoCart', 'displayDemoNothing', 'newOrder', 'actionNewInNine', 'displayHeader'], array_keys($hooks));
         self::assertArrayNotHasKey('notAHook', $hooks);
@@ -291,6 +292,42 @@ final class PrestashopIndexTest extends TestCase
         }
         self::assertNotContains('class|static||new', $refs);
         self::assertNotContains('constant|Order|class|static', $refs);
+    }
+
+    public function testTheHooksAModuleProvides(): void
+    {
+        $hooks = static fn (string $php): array => ModuleReferences::providedHooks(PhpApiScanner::tokens("<?php
+$php"));
+        self::assertSame([], $hooks("final class ModuleDefinition
+{
+    public const HOOKS = ['actionA'];
+}"), 'no PROVIDED_HOOKS: no own hooks');
+        self::assertSame(['actionLiteral', 'actionDouble', 'actionTrack', 'actionTyped'], $hooks(<<<'PHP'
+use const Some\THING;
+
+final class ModuleDefinition
+{
+    public const TRACK_HOOK = 'actionTrack';
+    public const string TYPED = 'actionTyped';
+    public const NUMBER = 42;
+    public const LIST = ['actionList'];
+    public const A = 'actionA', B = 'actionB';
+
+    /** The hooks other modules call. */
+    public const PROVIDED_HOOKS = [
+        'actionLiteral', // a comment
+        "actionDouble",
+        self::TRACK_HOOK,
+        self::TYPED,
+        self::NUMBER,
+        self::LIST,
+        self::A,
+        self::MISSING,
+        Other::TRACK_HOOK,
+        TRACK_HOOK,
+    ];
+}
+PHP), 'literals and self:: string constants of the same class; anything else is ignored');
     }
 
     public function testTheCheckFindsMissingDeprecatedAndChangedSymbols(): void
@@ -322,6 +359,8 @@ final class PrestashopIndexTest extends TestCase
         self::assertContains('error hook displayFooterOld: missing in PrestaShop 9.0.0', $issues, 'a hook a newer release removed stays an error');
         $issuesText = implode("\n", $issues);
         self::assertStringNotContainsString('actionDemoOwn', $issuesText, 'the module executes it itself');
+        self::assertStringNotContainsString('actionDemoLiteral', $issuesText, 'the module provides it (PROVIDED_HOOKS)');
+        self::assertStringNotContainsString('actionDemoProvided', $issuesText, 'the module provides it (PROVIDED_HOOKS, self::TRACK_HOOK)');
         self::assertStringNotContainsString('Tools::magic', $issuesText, '__callStatic answers it');
         self::assertStringNotContainsString('undefinedAnywhere', $issuesText, 'FrontController has a parent outside the index');
         self::assertStringNotContainsString('fromVendor', $issuesText, 'a vendor class or trait may declare it');
