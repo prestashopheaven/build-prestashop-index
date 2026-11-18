@@ -2,6 +2,10 @@
 
 The version is the one of the monorepo `mono-build-knowledge`.
 
+## 1.1.1
+
+- No changes (the version of the monorepo).
+
 ## 1.1.0
 
 - No changes (the version of the monorepo).
