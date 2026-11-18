@@ -2,6 +2,10 @@
 
 The version is the one of the monorepo `mono-build-knowledge`.
 
+## 1.1.0
+
+- No changes (the version of the monorepo).
+
 ## 1.0.2
 
 - `check`: the hooks of other modules a module listens to, declared in `ModuleDefinition::OTHER_MODULE_HOOKS` as hook =>
