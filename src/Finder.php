@@ -39,7 +39,7 @@ final class Finder
      */
     public static function find(SymbolIndex $index, string $term, int $limit = 20): array
     {
-        $term = trim($term);
+        $term = trim($term, " \n\r\t\v\0");
         if ($term === '') {
             return [];
         }
@@ -64,7 +64,7 @@ final class Finder
                 $methodScore = $member !== null ? self::score($member, TextTokens::of($member), [$method]) + intdiv($score, 2) : self::score($term, $words, [$method, "$short::$method"]);
                 if ($methodScore > 0 && ($member === null || self::score($member, TextTokens::of($member), [$method]) > 0)) {
                     $signature = is_string($m['g']) ? $m['g'] : implode(' | ', array_map(static fn (string $g, string $set): string => $g . ' [' . VersionSet::describe($set, $versions) . ']', array_keys($m['g']), $m['g']));
-                    $hits[] = self::hit($methodScore, 'method', "$name::$method", $m['v'], $m['d'] ?? '', $m['dm'] ?? '', $signature, trim((isset($m['s']) ? 'static ' : '') . ($m['vis'] ?? 'public')), $versions);
+                    $hits[] = self::hit($methodScore, 'method', "$name::$method", $m['v'], $m['d'] ?? '', $m['dm'] ?? '', $signature, trim((isset($m['s']) ? 'static ' : '') . ($m['vis'] ?? 'public'), " \n\r\t\v\0"), $versions);
                 }
             }
             foreach ($class['c'] ?? [] as $constant => $set) {
@@ -83,7 +83,7 @@ final class Finder
             foreach ($data['hooks'] as $name => $hook) {
                 $score = max(self::score($term, $words, [$name]), intdiv(self::score($term, $words, [$hook['t']]), 2));
                 if ($score > 0) {
-                    $hits[] = self::hit($score, 'hook', $name, $hook['v'], '', '', '', trim($hook['t'] . ' (' . implode(', ', $hook['s']) . ')'), $versions);
+                    $hits[] = self::hit($score, 'hook', $name, $hook['v'], '', '', '', trim($hook['t'] . ' (' . implode(', ', $hook['s']) . ')', " \n\r\t\v\0"), $versions);
                 }
             }
             foreach ($data['services'] as $id => $service) {

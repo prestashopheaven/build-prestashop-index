@@ -37,7 +37,7 @@ final class ServiceIds
         $childIndent = null;
         $current = null;
         foreach (preg_split('/\R/', $yaml) ?: [] as $line) {
-            $trimmed = trim($line);
+            $trimmed = trim($line, " \n\r\t\v\0");
             if ($trimmed === '' || $trimmed[0] === '#') {
                 continue;
             }
